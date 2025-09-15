@@ -122,9 +122,6 @@ with tab1:
         else:  
             st.warning("No matching litigation records found.")  
   
-# ---------------------------  
-# TAB 2: Dashboard & Calendar  
-# ---------------------------  
 with tab2:  
     st.subheader("Litigation Analytics Dashboard")  
   
@@ -135,48 +132,45 @@ with tab2:
     kpi3.metric("Decided Cases", (df_cases['Status'] == 'Decided').sum())  
     kpi4.metric("Stayed Cases", (df_cases['Status'] == 'Stayed').sum())  
   
-    # Charts  
+    # Charts with fixed y-axis ticks  
     col_a, col_b = st.columns(2)  
     with col_a:  
-        fig1 = px.bar(df_cases.groupby("Case Type").size().reset_index(name="Count"),  
-                      x="Case Type", y="Count", title="Cases by Type", color="Count")  
+        fig1 = px.bar(  
+            df_cases.groupby("Case Type").size().reset_index(name="Count"),  
+            x="Case Type", y="Count", title="Cases by Type", color="Count"  
+        )  
+        fig1.update_yaxes(dtick=1)  # force whole numbers  
         st.plotly_chart(fig1, use_container_width=True)  
     with col_b:  
         fig2 = px.pie(df_cases, names="Court", title="Cases by Court")  
         st.plotly_chart(fig2, use_container_width=True)  
   
     st.divider()  
-    st.subheader("📅 Upcoming Hearing Calendar")  
+    st.subheader("📅 Upcoming Hearing Calendar (Weekdays Only)")  
   
-    # Prepare events for calendar  
-    events = []  
-    for _, row in df_cases[df_cases["Next Hearing Date"].notna()].iterrows():  
-        events.append({  
-            "title": f"{row['Case No.']} – {row['Petitioner']}",  
-            "start": row["Next Hearing Date"].strftime("%Y-%m-%d"),  
-            "end": row["Next Hearing Date"].strftime("%Y-%m-%d"),  
-            "color": "red" if row["Status"] == "Pending" else "orange",  
-            "id": row["Case No."]  
-        })  
+    # Prepare hearing events  
+    cal_df = df_cases[df_cases["Next Hearing Date"].notna()].sort_values("Next Hearing Date")  
+    cal_df["Hearing"] = cal_df["Case No."] + " – " + cal_df["Petitioner"]  
   
-    calendar_options = {  
-        "initialView": "dayGridMonth",  
-        "headerToolbar": {  
-            "left": "prev,next today",  
-            "center": "title",  
-            "right": "dayGridMonth,timeGridWeek"  
-        },  
-        "selectable": True  
-    }  
+    # Plotly timeline as calendar substitute  
+    fig_cal = px.timeline(  
+        cal_df,  
+        x_start="Next Hearing Date",  
+        x_end="Next Hearing Date",  
+        y="Hearing",  
+        color="Status",  
+        title="Upcoming Hearings",  
+        hover_data=["Court", "Case Type", "Summary"]  
+    )  
+    fig_cal.update_yaxes(autorange="reversed")  # earliest on top  
+    fig_cal.update_xaxes(dtick="D1", tickformat="%d-%b")  # daily ticks  
+    st.plotly_chart(fig_cal, use_container_width=True)  
   
-    selected_event = calendar(events=events, options=calendar_options)  
-  
-    # Case Detail Popup  
-    if selected_event and "id" in selected_event:  
-        case_id = selected_event["id"]  
-        case_data = df_cases[df_cases["Case No."] == case_id].iloc[0]  
-  
-        st.markdown(f"### 📄 Case Details: {case_id}")  
+    # Case selection for details  
+    selected_case = st.selectbox("Select a case to view details", cal_df["Case No."].unique())  
+    if selected_case:  
+        case_data = df_cases[df_cases["Case No."] == selected_case].iloc[0]  
+        st.markdown(f"### 📄 Case Details: {selected_case}")  
         st.write(f"**Court:** {case_data['Court']}")  
         st.write(f"**Petitioner:** {case_data['Petitioner']}")  
         st.write(f"**Case Type:** {case_data['Case Type']}")  
@@ -185,14 +179,14 @@ with tab2:
         st.write(f"**Summary:** {case_data['Summary']}")  
         st.write(f"**Next Hearing:** {case_data['Next Hearing Date'].strftime('%d %b %Y')}")  
   
-        # Assignment section  
+        # Assignment inputs  
         st.markdown("#### 🗂 Assign to Department & Individual")  
         department = st.selectbox("Select Department", ["Legal", "Land Acquisition", "Environment", "Infrastructure"])  
         individual = st.text_input("Assign to Officer Name")  
   
         if st.button("✅ Save Assignment"):  
-            st.session_state.assignments[case_id] = {"Department": department, "Officer": individual}  
-            st.success(f"Assigned {case_id} to {department} → {individual}")  
+            st.session_state.assignments[selected_case] = {"Department": department, "Officer": individual}  
+            st.success(f"Assigned {selected_case} to {department} → {individual}")  
   
-        if case_id in st.session_state.assignments:  
-            st.info(f"Current Assignment: {st.session_state.assignments[case_id]['Department']} → {st.session_state.assignments[case_id]['Officer']}")  
+        if selected_case in st.session_state.assignments:  
+            st.info(f"Current Assignment: {st.session_state.assignments[selected_case]['Department']} → {st.session_state.assignments[selected_case]['Officer']}")  
