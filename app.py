@@ -5,9 +5,10 @@ import plotly.express as px
 from io import BytesIO  
 from datetime import datetime, timedelta  
 import random  
+from streamlit_calendar import calendar  
   
 # ---------------------------  
-# Fixed Demo Date  
+# Demo Date  
 # ---------------------------  
 TODAY = datetime(2025, 9, 15)  
   
@@ -35,6 +36,10 @@ def load_cases():
   
 df_cases = load_cases()  
   
+# Dictionary to store assignments  
+if "assignments" not in st.session_state:  
+    st.session_state.assignments = {}  
+  
 # ---------------------------  
 # Search Logic  
 # ---------------------------  
@@ -45,30 +50,30 @@ def agentic_case_search(query, court_filter, status_filter, case_type_filter):
     reasoning_steps.append("🤖 Step 1: Received litigation search request.")  
   
     if court_filter != "All":  
-        reasoning_steps.append(f"📂 Step 2: Filtering for court: {court_filter}")  
         results = results[results["Court"] == court_filter]  
+        reasoning_steps.append(f"📂 Filtered by Court: {court_filter}")  
   
     if status_filter != "All":  
-        reasoning_steps.append(f"📌 Step 3: Filtering for status: {status_filter}")  
         results = results[results["Status"] == status_filter]  
+        reasoning_steps.append(f"📌 Filtered by Status: {status_filter}")  
   
     if case_type_filter != "All":  
-        reasoning_steps.append(f"🏷 Step 4: Filtering for case type: {case_type_filter}")  
         results = results[results["Case Type"] == case_type_filter]  
+        reasoning_steps.append(f"🏷 Filtered by Case Type: {case_type_filter}")  
   
     if query.strip():  
-        reasoning_steps.append("🧠 Step 5: Searching in petitioner, summary, and case type...")  
         results = results[  
             results["Summary"].str.contains(query, case=False, na=False) |  
             results["Petitioner"].str.contains(query, case=False, na=False) |  
             results["Case Type"].str.contains(query, case=False, na=False)  
         ]  
+        reasoning_steps.append("🧠 Applied text search filter.")  
   
-    reasoning_steps.append(f"✅ Step 6: Found {len(results)} matching cases.")  
+    reasoning_steps.append(f"✅ Found {len(results)} matching cases.")  
     return reasoning_steps, results  
   
 # ---------------------------  
-# Download Helper  
+# Excel Download  
 # ---------------------------  
 def download_excel(df):  
     output = BytesIO()  
@@ -80,7 +85,6 @@ def download_excel(df):
 # Layout  
 # ---------------------------  
 st.set_page_config(page_title="GNIDA Litigation Intelligence", layout="wide")  
-  
 st.title("⚖️ GNIDA Litigation Intelligence Platform")  
 st.markdown("**A Smart AI-Powered Dashboard for Court Cases Against Greater Noida Authority**")  
 st.divider()  
@@ -88,7 +92,7 @@ st.divider()
 tab1, tab2 = st.tabs(["🔍 Litigation Search", "📊 Dashboard & Calendar"])  
   
 # ---------------------------  
-# TAB 1: Litigation Search  
+# TAB 1: Search  
 # ---------------------------  
 with tab1:  
     st.subheader("Search Litigation Records")  
@@ -142,26 +146,53 @@ with tab2:
         st.plotly_chart(fig2, use_container_width=True)  
   
     st.divider()  
-    st.subheader("📅 Upcoming Hearing Calendar (Weekdays Only)")  
+    st.subheader("📅 Upcoming Hearing Calendar")  
   
-    # Calendar-style Gantt chart  
-    cal_df = df_cases[df_cases["Next Hearing Date"].notna()].sort_values("Next Hearing Date")  
-    if not cal_df.empty:  
-        cal_df["Hearing"] = cal_df["Case No."] + " – " + cal_df["Petitioner"]  
-        fig_cal = px.timeline(  
-            cal_df,  
-            x_start="Next Hearing Date",  
-            x_end="Next Hearing Date",  
-            y="Hearing",  
-            color="Status",  
-            title="Upcoming Hearings Schedule",  
-        )  
-        fig_cal.update_yaxes(autorange="reversed")  # earliest at top  
-        fig_cal.update_layout(xaxis_title="Date", yaxis_title="Case")  
-        st.plotly_chart(fig_cal, use_container_width=True)  
-    else:  
-        st.info("No upcoming hearings scheduled.")  
+    # Prepare events for calendar  
+    events = []  
+    for _, row in df_cases[df_cases["Next Hearing Date"].notna()].iterrows():  
+        events.append({  
+            "title": f"{row['Case No.']} – {row['Petitioner']}",  
+            "start": row["Next Hearing Date"].strftime("%Y-%m-%d"),  
+            "end": row["Next Hearing Date"].strftime("%Y-%m-%d"),  
+            "color": "red" if row["Status"] == "Pending" else "orange",  
+            "id": row["Case No."]  
+        })  
   
-    st.divider()  
-    st.subheader("📜 All Case Records")  
-    st.dataframe(df_cases, use_container_width=True)  
+    calendar_options = {  
+        "initialView": "dayGridMonth",  
+        "headerToolbar": {  
+            "left": "prev,next today",  
+            "center": "title",  
+            "right": "dayGridMonth,timeGridWeek"  
+        },  
+        "selectable": True  
+    }  
+  
+    selected_event = calendar(events=events, options=calendar_options)  
+  
+    # Case Detail Popup  
+    if selected_event and "id" in selected_event:  
+        case_id = selected_event["id"]  
+        case_data = df_cases[df_cases["Case No."] == case_id].iloc[0]  
+  
+        st.markdown(f"### 📄 Case Details: {case_id}")  
+        st.write(f"**Court:** {case_data['Court']}")  
+        st.write(f"**Petitioner:** {case_data['Petitioner']}")  
+        st.write(f"**Case Type:** {case_data['Case Type']}")  
+        st.write(f"**Filing Date:** {case_data['Filing Date'].strftime('%d %b %Y')}")  
+        st.write(f"**Status:** {case_data['Status']}")  
+        st.write(f"**Summary:** {case_data['Summary']}")  
+        st.write(f"**Next Hearing:** {case_data['Next Hearing Date'].strftime('%d %b %Y')}")  
+  
+        # Assignment section  
+        st.markdown("#### 🗂 Assign to Department & Individual")  
+        department = st.selectbox("Select Department", ["Legal", "Land Acquisition", "Environment", "Infrastructure"])  
+        individual = st.text_input("Assign to Officer Name")  
+  
+        if st.button("✅ Save Assignment"):  
+            st.session_state.assignments[case_id] = {"Department": department, "Officer": individual}  
+            st.success(f"Assigned {case_id} to {department} → {individual}")  
+  
+        if case_id in st.session_state.assignments:  
+            st.info(f"Current Assignment: {st.session_state.assignments[case_id]['Department']} → {st.session_state.assignments[case_id]['Officer']}")  
